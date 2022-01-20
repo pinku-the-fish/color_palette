@@ -3,7 +3,9 @@ from ColorBin import ColorBin
 import numpy as np
 import copy
 
-def bin_pixels(image_path: str, bins_number: int = 10, sample_coverage: float = 0.25, max_pixels: int = 100000):
+
+def bin_pixels(image_path: str, bins_number: int = 10, xy_bins_number: int = 10, sample_coverage: float = 0.25,
+               max_pixels: int = 100000):
     rnd = np.random.default_rng()
     im = Image.open(image_path)
     drawn_pixels_number = int(sample_coverage * im.width * im.height)
@@ -36,12 +38,22 @@ def bin_pixels(image_path: str, bins_number: int = 10, sample_coverage: float = 
                 color_bins_3d[ctr_x][ctr_y][ctr_z] = color_bins[bin_ctr]
                 bin_ctr += 1
 
-    for clr in colors:
+    for k, clr in enumerate(colors):
         bin_pos = [int(np.floor(rgb_val / bin_size)) for rgb_val in clr]
         color_bins_3d[bin_pos[0]][bin_pos[1]][bin_pos[2]].pixels.append(clr)
+        color_bins_3d[bin_pos[0]][bin_pos[1]][bin_pos[2]].xy_positions.append(drawn_xy[k])
 
     for cb in color_bins:
         cb.process_pixels()
+
+    xy_bin_size_x = im.width / xy_bins_number
+    xy_bin_size_y = im.height / xy_bins_number
+
+    for the_bin in color_bins:
+        for pixel in the_bin.pixels:
+            xy_index_x = int(np.floor(pixel[0] / xy_bin_size_x))
+            xy_index_y = int(np.floor(pixel[1] / xy_bin_size_y))
+            the_bin.xy_indices.add((xy_index_x, xy_index_y))
 
     sorted_color_bins_with_pixels = list(filter(lambda b: b.pixels_number > 0,
                                                 sorted(color_bins, key=lambda el: el.pixels_number, reverse=True)))
@@ -65,33 +77,55 @@ def basic_color_choosing(sorted_color_bins, color_difference=100, color_number=1
     return colors
 
 
-def less_basic_color_choosing(delicate_sorted_color_bins):
-    sorted_color_bins = copy.deepcopy(delicate_sorted_color_bins)
-    colors = []
+def color_choose_color_accent(sorted_color_bins, how_many_closest_farthest):
+    sorted_color_bins = copy.deepcopy(sorted_color_bins)
     h = sorted_color_bins[0]
     for scb in sorted_color_bins:
-        scb.distance = np.sqrt((h.center[0] - scb.center[0])**2 + (h.center[1]-scb.center[1])**2 + (h.center[2]-scb.center[2])**2)
+        scb.distance = np.sqrt((h.center[0] - scb.center[0]) ** 2 + (h.center[1] - scb.center[1]) ** 2 +
+                               (h.center[2] - scb.center[2]) ** 2)
     bins_by_remoteness = sorted(sorted_color_bins, key=lambda el: el.distance)
-    ten_closest_colors = basic_color_choosing(sorted(bins_by_remoteness[0:int(0.5*len(bins_by_remoteness))], key=lambda el: el.pixels_number, reverse=True))
-    ten_farthest_colors = basic_color_choosing(sorted(bins_by_remoteness[int(0.5*len(bins_by_remoteness)):len(bins_by_remoteness)], key=lambda el: el.pixels_number, reverse=True))
-    for tcc in ten_closest_colors[0:5]:
-        colors.append(tcc)
-    for tfc in ten_farthest_colors[0:5]:
-        colors.append(tfc)
-    colors[0] = tuple(colors[0])
+    cut_point = int(0.5 * len(bins_by_remoteness))
+    colors_to_return = []
+    if how_many_closest_farthest[0] != 0:
+        closest_colors = basic_color_choosing(sorted(bins_by_remoteness[0:cut_point], key=lambda el: el.pixels_number,
+                                                     reverse=True), color_number=how_many_closest_farthest[0])
+        colors_to_return = colors_to_return + list(closest_colors)
+
+    if how_many_closest_farthest[1] != 0:
+        farthest_colors = basic_color_choosing(sorted(bins_by_remoteness[cut_point:len(bins_by_remoteness)],
+                                                      key=lambda el: el.pixels_number, reverse=True),
+                                               color_number=how_many_closest_farthest[1])
+        colors_to_return = colors_to_return + list(farthest_colors)
+
+    return colors_to_return
+
+
+def color_choose_xy_accents(sorted_color_bins, how_many_closest_farthest_standard, how_many_closest_farthest_accents):
+    sorted_color_bins = copy.deepcopy(sorted_color_bins)
+    for scb in sorted_color_bins:
+        scb.weight = np.sum(np.std(scb.xy_positions))
+    std_colors = color_choose_color_accent(sorted(sorted_color_bins, key=lambda b: b.weight, reverse=True),
+                                           how_many_closest_farthest_standard)
+    for scb in sorted_color_bins:
+        scb.weight = (1.0 / np.sum(np.std(scb.xy_positions)))
+    acc_colors = color_choose_color_accent(sorted(sorted_color_bins, key=lambda b: b.weight, reverse=True),
+                                           how_many_closest_farthest_accents)
+    colors = list(std_colors) + list(acc_colors)
+
     return colors
 
 
 def draw(im, colors):
-    tile_size = int(im.width/len(colors))
+    tile_size = int(im.width / len(colors))
     palette = Image.new('RGB', (im.width, tile_size), (0, 0, 0))
     dst = Image.new('RGB', (im.width, im.height + tile_size))
     palette_draw = ImageDraw.Draw(palette)
     ctr = 0
     for clr in colors:
-        palette_draw.rectangle(((ctr, 0), ((ctr+1)*tile_size, tile_size)), fill=(int(clr[0]), int(clr[1]), int(clr[2])))
+        palette_draw.rectangle(((ctr, 0), ((ctr + 1) * tile_size, tile_size)),
+                               fill=(int(clr[0]), int(clr[1]), int(clr[2])))
         ctr += tile_size
-        if ctr/tile_size == len(colors):
+        if ctr / tile_size == len(colors):
             break
 
     dst.paste(im, (0, 0))
@@ -101,6 +135,6 @@ def draw(im, colors):
 
 # //////////////////////////////////////
 
-sorted_bins, bins_3d, im = bin_pixels(r"data/tst13.webp")
-result = less_basic_color_choosing(sorted_bins)
-draw(im, result)
+sorted_bins, bins_3d, image = bin_pixels(r"data/tst8.jpg")
+result = color_choose_xy_accents(sorted_bins, (6, 3), (0, 0))
+draw(image, result)

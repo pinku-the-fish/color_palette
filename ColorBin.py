@@ -10,6 +10,9 @@ class ColorBin:
         self.average_pixel = None
         self.pixels_number = int
         self.distance = None
+        self.xy_positions = []
+        self.xy_indices = set()
+        self.weight = None
 
     def __repr__(self) -> str:
         return f"3d{self.bin_3d_position}: #{self.pixels_number}, avg{self.average_pixel}"
@@ -20,6 +23,3 @@ class ColorBin:
             self.average_pixel = np.mean(np.array(self.pixels), axis=0)
         else:
             self.average_pixel = None
-
-
-
